@@ -270,16 +270,75 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'autoTradeAlarm') {
     console.log("[background.ts] Auto-trade alarm triggered.");
-    const storedConfig = await chrome.storage.local.get(['autoTradeConfig', 'robloxUserId', 'rolimonsVerificationToken']);
-    console.log("[background.ts] Retrieved stored config:", storedConfig);
-    console.log("[background.ts] Retrieved autoTradeConfig from storage:", storedConfig.autoTradeConfig);
-    const tradeConfig = storedConfig.autoTradeConfig as TradeConfig;
-    const robloxUserId = storedConfig.robloxUserId as number;
-    const rolimonsVerificationToken = storedConfig.rolimonsVerificationToken as string;
+    const storedData = await chrome.storage.local.get(['autoTradeConfig', 'robloxUserId', 'rolimonsVerificationToken', 'autoCycleEnabled', 'savedConfigs', 'currentConfigId', 'lastUsedConfigIndex']);
+    console.log("[background.ts] Retrieved stored data:", storedData);
+    
+    let tradeConfig = storedData.autoTradeConfig as TradeConfig;
+    const robloxUserId = storedData.robloxUserId as number;
+    const rolimonsVerificationToken = storedData.rolimonsVerificationToken as string;
 
-    console.log("[background.ts] tradeConfig.offerItemIds before posting:", tradeConfig?.offerItemIds);
+    // Handle auto-cycling through configs if enabled
+    if (storedData.autoCycleEnabled && storedData.savedConfigs && storedData.savedConfigs.length > 0) {
+      console.log("[background.ts] Autocycle enabled with", storedData.savedConfigs.length, "saved configs.");
+      
+      const lastIndex = storedData.lastUsedConfigIndex || 0;
+      const nextIndex = (lastIndex + 1) % storedData.savedConfigs.length;
+      
+      console.log("[background.ts] Cycling from config index", lastIndex, "to", nextIndex);
+      
+      const selectedConfig = storedData.savedConfigs[nextIndex];
+      console.log("[background.ts] Using config:", selectedConfig.name);
+      
+      // Update the last used config index
+      await chrome.storage.local.set({ lastUsedConfigIndex: nextIndex });
+      
+      // Use the selected config
+      tradeConfig = {
+        offerItemIds: selectedConfig.offerItemIds || [],
+        requestItemIds: selectedConfig.requestItemIds || [],
+        tradeTags: selectedConfig.tradeTags || []
+      };
+    }
+
+    console.log("[background.ts] Final tradeConfig to use:", tradeConfig);
 
     if (tradeConfig && robloxUserId && rolimonsVerificationToken) {
+      // Convert userAssetIds to actual item IDs for offer items
+      if (tradeConfig.offerItemIds && tradeConfig.offerItemIds.length > 0) {
+        console.log("[background.ts] Converting userAssetIds to item IDs...");
+        
+        // Fetch user inventory to get the mapping
+        try {
+          const inventoryData = await RobloxAPIService.fetchUserCollectiblesInventory(robloxUserId);
+          
+          if (inventoryData && inventoryData.length > 0) {
+            const offerItemIdsConverted = tradeConfig.offerItemIds.map(userAssetId => {
+              const item = inventoryData.find((i: any) => i.userAssetId === userAssetId);
+              if (item) {
+                console.log("[background.ts] Converted userAssetId", userAssetId, "to item ID", item.assetId);
+                return item.assetId;
+              } else {
+                console.warn("[background.ts] Could not find item with userAssetId:", userAssetId);
+                return null;
+              }
+            }).filter(id => id !== null) as number[];
+            
+            console.log("[background.ts] Converted offer item IDs:", offerItemIdsConverted);
+            
+            // Update the trade config with converted IDs
+            tradeConfig = {
+              ...tradeConfig,
+              offerItemIds: offerItemIdsConverted
+            };
+          } else {
+            console.warn("[background.ts] No inventory data found for conversion.");
+          }
+        } catch (error) {
+          console.error("[background.ts] Error fetching inventory for ID conversion:", error);
+        }
+      }
+
+      console.log("[background.ts] Attempting to post trade ad...");
       await postTradeAdWrapper(tradeConfig, robloxUserId, rolimonsVerificationToken);
     } else {
       console.warn("[background.ts] Auto-trade skipped: Missing configuration or credentials.");
