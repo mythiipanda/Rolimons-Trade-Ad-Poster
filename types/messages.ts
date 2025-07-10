@@ -21,11 +21,12 @@ export interface RolimonsItem {
 }
 
 export interface MessageRequest {
-  action: "startAutoTrade" | "stopAutoTrade" | "postTradeAd" | "fetchCredentials" | "fetchUserAvatar" | "fetchUserInventory" | "fetchRolimonsItemThumbnails" | "getRolimonsItemDetails" | "getAllRolimonsItems";
+  action: "startAutoTrade" | "stopAutoTrade" | "postTradeAd" | "fetchCredentials" | "fetchUserAvatar" | "fetchUserInventory" | "fetchRolimonsItemThumbnails" | "getRolimonsItemDetails" | "getAllRolimonsItems" | "startPlugDetection" | "stopPlugDetection" | "updatePlugDetectionSettings" | "getPlugDetectionSettings" | "clearPlugIgnoreLists";
   interval?: number;
   tradeConfig?: TradeConfig;
   userId?: number;
   itemIds?: number[];
+  settings?: any; // For plug detection settings
   componentName?: string; // For shadcn/ui components if needed later
   query?: string; // For shadcn/ui components if needed later
 }
@@ -41,5 +42,8 @@ export interface MessageResponse {
   thumbnails?: { [key: number]: string };
   itemDetails?: { [key: number]: RolimonsItem };
   allItems?: RolimonsItem[];
+  settings?: any; // For plug detection settings
+  stats?: any; // For plug detection stats
+  plugs?: any[]; // For found plugs
   data?: any; // Generic for other responses
 }

@@ -3,9 +3,33 @@ import { getRolimonsItemDetails, getAllRolimonsItems } from "~lib/rolimons_item_
 import { RobloxAPIService } from "~lib/roblox_api_service";
 import { CacheService } from "~lib/cache_service"; // Import the new CacheService
 import { Utils } from "~lib/utils"; // Import the new Utils service
+import { PlugDetector, DEFAULT_PLUG_SETTINGS, type PlugDetectionSettings, type PlugUser } from "~lib/plug_detector";
 import type { TradeConfig, RobloxItem, MessageRequest, MessageResponse } from "~types/messages";
 
 console.log("[background.ts] Service worker script reloaded.");
+
+// Initialize PlugDetector
+let plugDetector: PlugDetector | null = null;
+
+async function initializePlugDetector(): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get(['plugDetectorSettings']);
+    const settings = stored.plugDetectorSettings || DEFAULT_PLUG_SETTINGS;
+    
+    plugDetector = new PlugDetector(settings);
+    await plugDetector.initialize();
+    
+    if (settings.enabled) {
+      await plugDetector.start();
+      console.log("[background.ts] Plug detector started automatically");
+    }
+  } catch (error) {
+    console.error("[background.ts] Error initializing plug detector:", error);
+  }
+}
+
+// Initialize plug detector when service worker starts
+initializePlugDetector();
 
 // Function to post a trade ad
 async function postTradeAdWrapper(tradeConfig: TradeConfig, robloxUserId: number, rolimonsVerificationToken: string): Promise<void> {
@@ -260,6 +284,98 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
       } catch (error: any) {
         console.error("[background.ts] Error fetching all Rolimons items:", error);
         sendResponse({ status: "failed", message: `Error fetching all items: ${error.message}` } as MessageResponse);
+      }
+    })();
+    return true;
+  } else if (request.action === "startPlugDetection") {
+    (async () => {
+      if (!plugDetector) {
+        sendResponse({ status: "failed", message: "Plug detector not initialized" } as MessageResponse);
+        return;
+      }
+      
+      try {
+        await plugDetector.start();
+        const settings = plugDetector.getSettings();
+        await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: true } });
+        console.log("[background.ts] Plug detection started");
+        sendResponse({ status: "success", message: "Plug detection started" } as MessageResponse);
+      } catch (error: any) {
+        console.error("[background.ts] Error starting plug detection:", error);
+        sendResponse({ status: "failed", message: `Error starting plug detection: ${error.message}` } as MessageResponse);
+      }
+    })();
+    return true;
+  } else if (request.action === "stopPlugDetection") {
+    (async () => {
+      if (!plugDetector) {
+        sendResponse({ status: "failed", message: "Plug detector not initialized" } as MessageResponse);
+        return;
+      }
+      
+      try {
+        plugDetector.stop();
+        const settings = plugDetector.getSettings();
+        await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: false } });
+        console.log("[background.ts] Plug detection stopped");
+        sendResponse({ status: "success", message: "Plug detection stopped" } as MessageResponse);
+      } catch (error: any) {
+        console.error("[background.ts] Error stopping plug detection:", error);
+        sendResponse({ status: "failed", message: `Error stopping plug detection: ${error.message}` } as MessageResponse);
+      }
+    })();
+    return true;
+  } else if (request.action === "updatePlugDetectionSettings") {
+    (async () => {
+      if (!plugDetector) {
+        sendResponse({ status: "failed", message: "Plug detector not initialized" } as MessageResponse);
+        return;
+      }
+      
+      try {
+        const newSettings = request.settings as Partial<PlugDetectionSettings>;
+        plugDetector.updateSettings(newSettings);
+        const updatedSettings = plugDetector.getSettings();
+        await chrome.storage.local.set({ plugDetectorSettings: updatedSettings });
+        console.log("[background.ts] Plug detection settings updated");
+        sendResponse({ status: "success", settings: updatedSettings } as MessageResponse);
+      } catch (error: any) {
+        console.error("[background.ts] Error updating plug detection settings:", error);
+        sendResponse({ status: "failed", message: `Error updating settings: ${error.message}` } as MessageResponse);
+      }
+    })();
+    return true;
+  } else if (request.action === "getPlugDetectionSettings") {
+    (async () => {
+      if (!plugDetector) {
+        sendResponse({ status: "failed", message: "Plug detector not initialized" } as MessageResponse);
+        return;
+      }
+      
+      try {
+        const settings = plugDetector.getSettings();
+        const stats = plugDetector.getIgnoreListStats();
+        sendResponse({ status: "success", settings: settings, stats: stats } as MessageResponse);
+      } catch (error: any) {
+        console.error("[background.ts] Error getting plug detection settings:", error);
+        sendResponse({ status: "failed", message: `Error getting settings: ${error.message}` } as MessageResponse);
+      }
+    })();
+    return true;
+  } else if (request.action === "clearPlugIgnoreLists") {
+    (async () => {
+      if (!plugDetector) {
+        sendResponse({ status: "failed", message: "Plug detector not initialized" } as MessageResponse);
+        return;
+      }
+      
+      try {
+        plugDetector.clearIgnoreLists();
+        console.log("[background.ts] Plug detection ignore lists cleared");
+        sendResponse({ status: "success", message: "Ignore lists cleared" } as MessageResponse);
+      } catch (error: any) {
+        console.error("[background.ts] Error clearing ignore lists:", error);
+        sendResponse({ status: "failed", message: `Error clearing ignore lists: ${error.message}` } as MessageResponse);
       }
     })();
     return true;

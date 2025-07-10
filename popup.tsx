@@ -34,6 +34,18 @@ function IndexPopup() {
   const [currentConfigId, setCurrentConfigId] = useState<string | null>(null);
   const [autoCycleEnabled, setAutoCycleEnabled] = useState<boolean>(false);
 
+  // Plug detection state
+  const [plugDetectionEnabled, setPlugDetectionEnabled] = useState<boolean>(false);
+  const [plugSettings, setPlugSettings] = useState<any>({
+    maxTradeAds: 100,
+    fetchInterval: 30,
+    tempIgnoreDays: 7,
+    minValue: 10000,
+    enabled: false
+  });
+  const [plugStats, setPlugStats] = useState<any>({ permanent: 0, temporary: 0 });
+  const [foundPlugs, setFoundPlugs] = useState<any[]>([]);
+
   // Available trade tags
   const availableTags = ["adds", "upgrade", "downgrade", "any", "wishlist", "demand", "rares", "rap", "robux", "projecteds"];
 
@@ -283,6 +295,135 @@ function IndexPopup() {
     }
   }, [allRolimonsItems, userInventory, loadConfigsAndSettings]);
 
+  // Load plug detection settings
+  const loadPlugSettings = useCallback(async () => {
+    try {
+      const response = await sendMessageToBackground({ action: "getPlugDetectionSettings" });
+      if (response && response.status === "success") {
+        setPlugSettings(response.settings || {});
+        setPlugStats(response.stats || { permanent: 0, temporary: 0 });
+        setPlugDetectionEnabled(response.settings?.enabled || false);
+      }
+    } catch (error) {
+      console.error("[popup.tsx] Error loading plug settings:", error);
+    }
+  }, [sendMessageToBackground]);
+
+  // Effect to load plug settings
+  useEffect(() => {
+    loadPlugSettings();
+  }, [loadPlugSettings]);
+
+  // Listen for plug detection messages and load persistent plugs
+  useEffect(() => {
+    // Load persistent plugs on mount
+    chrome.storage.local.get(['recentPlugs'], (result) => {
+      if (result.recentPlugs) {
+        setFoundPlugs(result.recentPlugs);
+      }
+    });
+
+    const messageListener = (message: any) => {
+      if (message.action === 'plugsFound' && message.plugs) {
+        setFoundPlugs(prev => {
+          // Merge new plugs with previous, keeping unique by userId, most recent first, max 20
+          const combined = [...message.plugs, ...prev];
+          const unique = [];
+          const seen = new Set();
+          for (const plug of combined) {
+            if (!seen.has(plug.userId)) {
+              unique.push(plug);
+              seen.add(plug.userId);
+            }
+            if (unique.length >= 20) break;
+          }
+          // Also update persistent storage
+          chrome.storage.local.set({ recentPlugs: unique });
+          return unique;
+        });
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(messageListener);
+    return () => chrome.runtime.onMessage.removeListener(messageListener);
+  }, []);
+
+  // Plug detection functions
+  const startPlugDetection = async () => {
+    setIsLoading(true);
+    try {
+      const response = await sendMessageToBackground({ action: "startPlugDetection" });
+      if (response && response.status === "success") {
+        setPlugDetectionEnabled(true);
+        alert('Plug detection started!');
+      } else {
+        alert(`Failed to start plug detection: ${response?.message || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      alert(`Failed to start plug detection: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const stopPlugDetection = async () => {
+    setIsLoading(true);
+    try {
+      const response = await sendMessageToBackground({ action: "stopPlugDetection" });
+      if (response && response.status === "success") {
+        setPlugDetectionEnabled(false);
+        alert('Plug detection stopped!');
+      } else {
+        alert(`Failed to stop plug detection: ${response?.message || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      alert(`Failed to stop plug detection: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updatePlugSettings = async (newSettings: any) => {
+    setIsLoading(true);
+    try {
+      const response = await sendMessageToBackground({
+        action: "updatePlugDetectionSettings",
+        settings: newSettings
+      });
+      if (response && response.status === "success") {
+        setPlugSettings(response.settings);
+        alert('Settings updated successfully!');
+      } else {
+        alert(`Failed to update settings: ${response?.message || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      alert(`Failed to update settings: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const clearIgnoreLists = async () => {
+    if (!confirm('Are you sure you want to clear all ignore lists? This will allow previously ignored users to be detected again.')) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await sendMessageToBackground({ action: "clearPlugIgnoreLists" });
+      if (response && response.status === "success") {
+        setPlugStats({ permanent: 0, temporary: 0 });
+        alert('Ignore lists cleared!');
+      } else {
+        alert(`Failed to clear ignore lists: ${response?.message || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      alert(`Failed to clear ignore lists: ${error.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Format value for display (38000 -> 38K, 1400000 -> 1.4M)
   const formatValue = (value: number | string | undefined): string => {
     if (!value || value === 0) return 'N/A';
@@ -516,6 +657,7 @@ function IndexPopup() {
     { id: "inventory", label: "Inventory", icon: "🎒" },
     { id: "search", label: "Search", icon: "🔍" },
     { id: "config", label: "Config", icon: "📋" },
+    { id: "plugs", label: "Plugs", icon: "🔥" },
     { id: "settings", label: "Settings", icon: "⚙️" }
   ];
 
@@ -1039,6 +1181,159 @@ function IndexPopup() {
                   );
                 })}
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "plugs" && (
+          <div className="space-y-4">
+            {/* Plug Detection Control */}
+            <div className="card p-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">🔥 Plug Detection</h3>
+              
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">Status</p>
+                    <p className="text-sm text-gray-500">{plugDetectionEnabled ? 'Running' : 'Stopped'}</p>
+                  </div>
+                  <div className={`w-3 h-3 rounded-full ${plugDetectionEnabled ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={startPlugDetection}
+                    disabled={isLoading || plugDetectionEnabled}
+                    className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? 'Starting...' : 'Start Detection'}
+                  </button>
+                  <button
+                    onClick={stopPlugDetection}
+                    disabled={isLoading || !plugDetectionEnabled}
+                    className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? 'Stopping...' : 'Stop Detection'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Detection Settings */}
+            <div className="card p-4">
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Detection Settings</h4>
+              
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Max Trade Ads</label>
+                  <input
+                    type="number"
+                    value={plugSettings.maxTradeAds || 100}
+                    onChange={(e) => setPlugSettings(prev => ({ ...prev, maxTradeAds: parseInt(e.target.value) }))}
+                    className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+                    min="1"
+                    max="1000"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Scan Interval (seconds)</label>
+                  <input
+                    type="number"
+                    value={plugSettings.fetchInterval || 30}
+                    onChange={(e) => setPlugSettings(prev => ({ ...prev, fetchInterval: parseInt(e.target.value) }))}
+                    className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+                    min="10"
+                    max="300"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Min Trade Value</label>
+                  <input
+                    type="number"
+                    value={plugSettings.minValue || 10000}
+                    onChange={(e) => setPlugSettings(prev => ({ ...prev, minValue: parseInt(e.target.value) }))}
+                    className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+                    min="1000"
+                    step="1000"
+                  />
+                </div>
+
+                <button
+                  onClick={() => updatePlugSettings(plugSettings)}
+                  disabled={isLoading}
+                  className="btn-secondary w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? 'Updating...' : 'Update Settings'}
+                </button>
+              </div>
+            </div>
+
+            {/* Statistics */}
+            <div className="card p-4">
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Statistics</h4>
+              
+              <div className="grid grid-cols-2 gap-4 mb-3">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-blue-600">{plugStats.permanent || 0}</p>
+                  <p className="text-xs text-gray-500">Permanent Ignores</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-orange-600">{plugStats.temporary || 0}</p>
+                  <p className="text-xs text-gray-500">Temporary Ignores</p>
+                </div>
+              </div>
+
+              <button
+                onClick={clearIgnoreLists}
+                disabled={isLoading}
+                className="btn-secondary w-full text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'Clearing...' : 'Clear Ignore Lists'}
+              </button>
+            </div>
+
+            {/* Found Plugs */}
+            <div className="card p-4">
+              <h4 className="text-sm font-medium text-gray-700 mb-3">Recent Plugs Found ({foundPlugs.length})</h4>
+              
+              {foundPlugs.length > 0 ? (
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {foundPlugs.map((plug, index) => (
+                    <div key={index} className="bg-gradient-to-r from-orange-50 to-red-50 border border-orange-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <h5 className="text-sm font-medium text-gray-900">{plug.username}</h5>
+                        <span className="text-xs text-orange-600 font-medium">{plug.tradeAdCount} ads</span>
+                      </div>
+                      <p className="text-xs text-gray-600 mb-2">Value: {plug.totalValue?.toLocaleString() || 'N/A'}</p>
+                      <div className="flex gap-2">
+                        <a
+                          href={`https://www.rolimons.com/player/${plug.userId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-blue-600 hover:text-blue-800 underline"
+                        >
+                          Profile
+                        </a>
+                        <a
+                          href={`https://www.roblox.com/users/${plug.userId}/trade`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-green-600 hover:text-green-800 underline"
+                        >
+                          Send Trade
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-4 text-gray-500">
+                  <p className="text-sm">No plugs found yet.</p>
+                  <p className="text-xs">Start detection to find potential trades!</p>
+                </div>
+              )}
             </div>
           </div>
         )}
