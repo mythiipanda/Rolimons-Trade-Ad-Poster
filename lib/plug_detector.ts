@@ -331,7 +331,7 @@ export class PlugDetector {
     for (const plug of plugs) {
       chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/icon48.png',
+        iconUrl: chrome.runtime.getURL('/icon48.plasmo.aced7582.png'),
         title: `🔥 Plug Found: ${plug.username}`,
         message: `${plug.tradeAdCount} trade ads • ${plug.totalValue.toLocaleString()} value`,
         priority: 2

@@ -55,7 +55,7 @@ async function postTradeAdWrapper(tradeConfig: TradeConfig, robloxUserId: number
     console.warn("[background.ts] No offer items selected. Skipping trade ad post.");
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icons/icon48.png',
+      iconUrl: chrome.runtime.getURL('/icon48.plasmo.aced7582.png'),
       title: 'Trade Ad Skipped',
       message: 'No offer items selected. Please select items in the popup.',
       priority: 1
@@ -75,7 +75,7 @@ async function postTradeAdWrapper(tradeConfig: TradeConfig, robloxUserId: number
     console.log("[background.ts] Trade ad posted successfully:", response);
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icons/icon48.png',
+      iconUrl: chrome.runtime.getURL('/icon48.plasmo.aced7582.png'),
       title: 'Trade Ad Posted!',
       message: 'Your trade ad has been successfully posted on Rolimons.',
       priority: 2
@@ -84,7 +84,7 @@ async function postTradeAdWrapper(tradeConfig: TradeConfig, robloxUserId: number
     console.error("[background.ts] Error posting trade ad:", error);
     chrome.notifications.create({
       type: 'basic',
-      iconUrl: 'icons/icon48.png',
+      iconUrl: chrome.runtime.getURL('/icon48.plasmo.aced7582.png'),
       title: 'Trade Ad Posting Failed',
       message: `Failed to post trade ad: ${error.message || error}`,
       priority: 2
@@ -419,48 +419,13 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     console.log("[background.ts] Final tradeConfig to use:", tradeConfig);
 
     if (tradeConfig && robloxUserId && rolimonsVerificationToken) {
-      // Convert userAssetIds to actual item IDs for offer items
-      if (tradeConfig.offerItemIds && tradeConfig.offerItemIds.length > 0) {
-        console.log("[background.ts] Converting userAssetIds to item IDs...");
-        
-        // Fetch user inventory to get the mapping
-        try {
-          const inventoryData = await RobloxAPIService.fetchUserCollectiblesInventory(robloxUserId);
-          
-          if (inventoryData && inventoryData.length > 0) {
-            const offerItemIdsConverted = tradeConfig.offerItemIds.map(userAssetId => {
-              const item = inventoryData.find((i: any) => i.userAssetId === userAssetId);
-              if (item) {
-                console.log("[background.ts] Converted userAssetId", userAssetId, "to item ID", item.assetId);
-                return item.assetId;
-              } else {
-                console.warn("[background.ts] Could not find item with userAssetId:", userAssetId);
-                return null;
-              }
-            }).filter(id => id !== null) as number[];
-            
-            console.log("[background.ts] Converted offer item IDs:", offerItemIdsConverted);
-            
-            // Update the trade config with converted IDs
-            tradeConfig = {
-              ...tradeConfig,
-              offerItemIds: offerItemIdsConverted
-            };
-          } else {
-            console.warn("[background.ts] No inventory data found for conversion.");
-          }
-        } catch (error) {
-          console.error("[background.ts] Error fetching inventory for ID conversion:", error);
-        }
-      }
-
       console.log("[background.ts] Attempting to post trade ad...");
       await postTradeAdWrapper(tradeConfig, robloxUserId, rolimonsVerificationToken);
     } else {
       console.warn("[background.ts] Auto-trade skipped: Missing configuration or credentials.");
       chrome.notifications.create({
         type: 'basic',
-        iconUrl: 'icons/icon48.png',
+        iconUrl: chrome.runtime.getURL('/icon48.plasmo.aced7582.png'),
         title: 'Auto-Trade Skipped',
         message: 'Auto-trade was skipped due to missing configuration or credentials. Please set them in the popup.',
         priority: 1

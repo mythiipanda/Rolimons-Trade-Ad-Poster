@@ -74,22 +74,33 @@ export class RobloxAPIService {
    */
   static async fetchUserCollectiblesInventory(userId: number): Promise<any[]> {
     console.log(`[RobloxAPIService] Fetching user collectibles inventory for userId: ${userId}...`);
-    const inventoryUrl = `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?limit=100`;
+    let allItems: any[] = [];
+    let nextCursor: string | null = null;
+    const limit = 100; // Max limit per request
+
     try {
-      const inventoryResponse = await fetch(inventoryUrl, { credentials: 'include' });
+      do {
+        let url = `https://inventory.roblox.com/v1/users/${userId}/assets/collectibles?limit=${limit}`;
+        if (nextCursor) {
+          url += `&cursor=${nextCursor}`;
+        }
 
-      if (!inventoryResponse.ok) {
-        const errorText = await inventoryResponse.text();
-        throw new Error(`HTTP error! status: ${inventoryResponse.status}, body: ${errorText}`);
-      }
+        const inventoryResponse = await fetch(url, { credentials: 'include' });
 
-      const inventoryData = await inventoryResponse.json();
-      if (!inventoryData.data) {
-        console.warn("[RobloxAPIService] No inventory data found.");
-        return [];
-      }
+        if (!inventoryResponse.ok) {
+          const errorText = await inventoryResponse.text();
+          throw new Error(`HTTP error! status: ${inventoryResponse.status}, body: ${errorText}`);
+        }
+
+        const inventoryData = await inventoryResponse.json();
+        if (inventoryData.data) {
+          allItems = allItems.concat(inventoryData.data);
+        }
+        nextCursor = inventoryData.nextPageCursor || null;
+      } while (nextCursor);
+
       console.log("[RobloxAPIService] Successfully fetched user inventory data.");
-      return inventoryData.data;
+      return allItems;
     } catch (error) {
       console.error("[RobloxAPIService] Error fetching user inventory:", error);
       throw error; // Re-throw to be handled by the caller
