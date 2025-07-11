@@ -11,6 +11,7 @@ export interface PlugUser {
   totalValue: number;
   avatarUrl?: string;
   timestamp: number;
+  lastChecked?: number; // Timestamp of when this user's trade ad count was last checked
 }
 
 export interface RecentTradeAd {
@@ -29,6 +30,7 @@ export interface PlugDetectionSettings {
   tempIgnoreDays: number;
   enabled: boolean;
   minValue: number; // minimum trade value to consider
+  cacheDurationHours: number; // Duration to cache user trade ad counts in hours
 }
 
 export interface IgnoredUser {
@@ -38,11 +40,18 @@ export interface IgnoredUser {
   tradeAdCount: number;
 }
 
+export interface CachedUserTradeAdCount {
+  userId: number;
+  tradeAdCount: number;
+  timestamp: number; // Timestamp when the count was fetched
+}
+
 export class PlugDetector {
   private settings: PlugDetectionSettings;
   private rolimonsItemDetails: Record<number, any> = {};
   private permanentIgnoreList: Set<number> = new Set();
   private temporaryIgnoreList: Map<number, IgnoredUser> = new Map();
+  private userTradeAdCache: Map<number, CachedUserTradeAdCount> = new Map();
   private isRunning: boolean = false;
   private intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -55,6 +64,7 @@ export class PlugDetector {
     console.log("[PlugDetector] Initializing...");
     await this.loadRolimonsItems();
     await this.cleanTemporaryIgnoreList();
+    await this.loadUserTradeAdCache();
   }
 
   async start(): Promise<void> {
@@ -133,32 +143,44 @@ export class PlugDetector {
   }
 
   private async getUserTradeAdCount(userId: number): Promise<number | null> {
+    const cached = this.userTradeAdCache.get(userId);
+    const now = Date.now();
+    const cacheDurationMs = this.settings.cacheDurationHours * 60 * 60 * 1000;
+
+    if (cached && (now - cached.timestamp < cacheDurationMs)) {
+      // console.log(`[PlugDetector] Using cached trade ad count for user ${userId}`);
+      return cached.tradeAdCount;
+    }
+
     try {
       const response = await fetch(`https://www.rolimons.com/player/${userId}`);
       if (response.ok) {
         const html = await response.text();
 
-        // Try to extract using both possible XPaths (simulate with regex)
-        // 1. <div class="trade-ads-created-container">...<span class="stat-data">123</span>
-        // 2. <h6>Trade Ads Created</h6><span>123</span>
         let match: RegExpMatchArray | null = null;
 
-        // Try to match <div ...><span class="stat-data">123</span>
         match = html.match(/trade-ads-created-container[\s\S]*?stat-data[^>]*>([\d,]+)/i);
         if (match && match[1]) {
-          return parseInt(match[1].replace(/,/g, ''));
+          const count = parseInt(match[1].replace(/,/g, ''));
+          this.userTradeAdCache.set(userId, { userId, tradeAdCount: count, timestamp: now });
+          this.saveUserTradeAdCache();
+          return count;
         }
 
-        // Try to match <h6>Trade Ads Created</h6><span>123</span>
         match = html.match(/Trade Ads Created<\/h6>\s*<span[^>]*>([\d,]+)/i);
         if (match && match[1]) {
-          return parseInt(match[1].replace(/,/g, ''));
+          const count = parseInt(match[1].replace(/,/g, ''));
+          this.userTradeAdCache.set(userId, { userId, tradeAdCount: count, timestamp: now });
+          this.saveUserTradeAdCache();
+          return count;
         }
 
-        // Fallback: try to match any stat-data with a number
         match = html.match(/stat-data[^>]*>([\d,]+)/i);
         if (match && match[1]) {
-          return parseInt(match[1].replace(/,/g, ''));
+          const count = parseInt(match[1].replace(/,/g, ''));
+          this.userTradeAdCache.set(userId, { userId, tradeAdCount: count, timestamp: now });
+          this.saveUserTradeAdCache();
+          return count;
         }
       }
     } catch (error) {
@@ -245,6 +267,28 @@ export class PlugDetector {
     }
   }
 
+  private async loadUserTradeAdCache(): Promise<void> {
+    try {
+      const stored = await chrome.storage.local.get(['plugDetector_userTradeAdCache']);
+      if (stored.plugDetector_userTradeAdCache) {
+        this.userTradeAdCache = new Map(Object.entries(stored.plugDetector_userTradeAdCache).map(([k, v]) => [parseInt(k), v as CachedUserTradeAdCount]));
+      }
+    } catch (error) {
+      console.error("[PlugDetector] Error loading user trade ad cache:", error);
+    }
+  }
+
+  private async saveUserTradeAdCache(): Promise<void> {
+    try {
+      const cacheObject = Object.fromEntries(this.userTradeAdCache);
+      await chrome.storage.local.set({
+        plugDetector_userTradeAdCache: cacheObject
+      });
+    } catch (error) {
+      console.error("[PlugDetector] Error saving user trade ad cache:", error);
+    }
+  }
+
   private async scanForPlugs(): Promise<PlugUser[]> {
     console.log(`[PlugDetector] ${new Date().toLocaleTimeString()} - Scanning for plugs...`);
     
@@ -301,14 +345,6 @@ export class PlugDetector {
         if (persistentPlugs.length > 20) persistentPlugs = persistentPlugs.slice(0, 20);
         await chrome.storage.local.set({ recentPlugs: persistentPlugs });
 
-        // Do NOT add to temporary ignore anymore (user wants to see plugs even after clicking away)
-        // this.addToTemporaryIgnore({
-        //   userId: ad.userId,
-        //   username: ad.username,
-        //   addedDate: new Date().toISOString(),
-        //   tradeAdCount
-        // });
-
         console.log(`[PlugDetector] Found plug: ${ad.username} (${tradeAdCount} trade ads, ${totalValue} value)`);
       } else {
         // User has too many trade ads, add to permanent ignore
@@ -316,7 +352,7 @@ export class PlugDetector {
       }
 
       // Add small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 5000)); // Increased delay to 5000ms (5 seconds)
     }
 
     if (foundPlugs.length > 0) {
@@ -381,5 +417,6 @@ export const DEFAULT_PLUG_SETTINGS: PlugDetectionSettings = {
   fetchInterval: 30, // 30 seconds
   tempIgnoreDays: 7,
   enabled: false,
-  minValue: 10000 // 10K minimum value
+  minValue: 10000, // 10K minimum value
+  cacheDurationHours: 1 // Cache user trade ad counts for 1 hour
 };

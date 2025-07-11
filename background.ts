@@ -22,6 +22,7 @@ async function initializePlugDetector(): Promise<void> {
     if (settings.enabled) {
       await plugDetector.start();
       console.log("[background.ts] Plug detector started automatically");
+      chrome.runtime.sendMessage({ action: 'plugDetectionStatusUpdate', isRunning: true }).catch(() => {});
     }
   } catch (error) {
     console.error("[background.ts] Error initializing plug detector:", error);
@@ -299,6 +300,7 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
         const settings = plugDetector.getSettings();
         await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: true } });
         console.log("[background.ts] Plug detection started");
+        chrome.runtime.sendMessage({ action: 'plugDetectionStatusUpdate', isRunning: true }).catch(() => {});
         sendResponse({ status: "success", message: "Plug detection started" } as MessageResponse);
       } catch (error: any) {
         console.error("[background.ts] Error starting plug detection:", error);
@@ -318,6 +320,7 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
         const settings = plugDetector.getSettings();
         await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: false } });
         console.log("[background.ts] Plug detection stopped");
+        chrome.runtime.sendMessage({ action: 'plugDetectionStatusUpdate', isRunning: false }).catch(() => {});
         sendResponse({ status: "success", message: "Plug detection stopped" } as MessageResponse);
       } catch (error: any) {
         console.error("[background.ts] Error stopping plug detection:", error);

@@ -304,25 +304,23 @@ function IndexPopup() {
         setPlugStats(response.stats || { permanent: 0, temporary: 0 });
         setPlugDetectionEnabled(response.settings?.enabled || false);
       }
+      // Also load recent plugs when plug settings are loaded
+      const storedPlugs = await chrome.storage.local.get(['recentPlugs']);
+      if (storedPlugs.recentPlugs) {
+        setFoundPlugs(storedPlugs.recentPlugs);
+      }
     } catch (error) {
       console.error("[popup.tsx] Error loading plug settings:", error);
     }
   }, [sendMessageToBackground]);
 
-  // Effect to load plug settings
+  // Effect to load plug settings and recent plugs on initial mount
   useEffect(() => {
     loadPlugSettings();
   }, [loadPlugSettings]);
-
-  // Listen for plug detection messages and load persistent plugs
+ 
+  // Listen for plug detection messages
   useEffect(() => {
-    // Load persistent plugs on mount
-    chrome.storage.local.get(['recentPlugs'], (result) => {
-      if (result.recentPlugs) {
-        setFoundPlugs(result.recentPlugs);
-      }
-    });
-
     const messageListener = (message: any) => {
       if (message.action === 'plugsFound' && message.plugs) {
         setFoundPlugs(prev => {
@@ -341,12 +339,21 @@ function IndexPopup() {
           chrome.storage.local.set({ recentPlugs: unique });
           return unique;
         });
+      } else if (message.action === 'plugDetectionStatusUpdate' && typeof message.isRunning === 'boolean') {
+        setPlugDetectionEnabled(message.isRunning);
       }
     };
-
+ 
     chrome.runtime.onMessage.addListener(messageListener);
     return () => chrome.runtime.onMessage.removeListener(messageListener);
   }, []);
+ 
+  // Effect to refresh plugs and status when "plugs" tab is activated
+  useEffect(() => {
+    if (activeTab === "plugs") {
+      loadPlugSettings(); // This will also refresh foundPlugs and status
+    }
+  }, [activeTab, loadPlugSettings]);
 
   // Plug detection functions
   const startPlugDetection = async () => {
