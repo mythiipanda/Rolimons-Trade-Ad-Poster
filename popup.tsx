@@ -36,6 +36,7 @@ function IndexPopup() {
 
   // Plug detection state
   const [plugDetectionEnabled, setPlugDetectionEnabled] = useState<boolean>(false);
+  const [isPlugDetectionRunning, setIsPlugDetectionRunning] = useState<boolean>(false);
   const [plugSettings, setPlugSettings] = useState<any>({
     maxTradeAds: 100,
     fetchInterval: 30,
@@ -45,6 +46,19 @@ function IndexPopup() {
   });
   const [plugStats, setPlugStats] = useState<any>({ permanent: 0, temporary: 0 });
   const [foundPlugs, setFoundPlugs] = useState<any[]>([]);
+
+  // Trade ad poster status
+  const [tradeAdStatus, setTradeAdStatus] = useState<{ status: string, message: string } | null>(null);
+
+  // Trade ad poster running state
+  const [isPosterRunning, setIsPosterRunning] = useState<boolean>(false);
+  // Hide status after a timeout
+  useEffect(() => {
+    if (tradeAdStatus) {
+      const timeout = setTimeout(() => setTradeAdStatus(null), 4000);
+      return () => clearTimeout(timeout);
+    }
+  }, [tradeAdStatus]);
 
   // Available trade tags
   const availableTags = ["adds", "upgrade", "downgrade", "any", "wishlist", "demand", "rares", "rap", "robux", "projecteds"];
@@ -276,6 +290,15 @@ function IndexPopup() {
     const initializeCoreData = async () => {
       loadAndDisplayCredentials();
       await loadRolimonsItems();
+      // Query poster running state on mount
+      try {
+        const response = await sendMessageToBackground({ action: "getAutoTradeStatus" });
+        if (response && response.status === "success") {
+          setIsPosterRunning(!!response.isRunning);
+        }
+      } catch (e) {
+        setIsPosterRunning(false);
+      }
     };
     initializeCoreData();
   }, [loadAndDisplayCredentials, loadRolimonsItems]);
@@ -317,7 +340,38 @@ function IndexPopup() {
   // Effect to load plug settings and recent plugs on initial mount
   useEffect(() => {
     loadPlugSettings();
+    // Query plug detection running state on mount
+    (async () => {
+      try {
+        const response = await sendMessageToBackground({ action: "getPlugDetectionStatus" });
+        if (response && response.status === "success") {
+          setIsPlugDetectionRunning(!!response.isRunning);
+        }
+      } catch (e) {
+        setIsPlugDetectionRunning(false);
+      }
+      // Load found plugs from storage on mount for live UI
+      const storedPlugs = await chrome.storage.local.get(['recentPlugs']);
+      if (storedPlugs.recentPlugs) {
+        setFoundPlugs(storedPlugs.recentPlugs);
+      }
+    })();
   }, [loadPlugSettings]);
+  // Always re-query plug detection status when "Plugs" tab is activated
+  useEffect(() => {
+    if (activeTab === "plugs") {
+      (async () => {
+        try {
+          const response = await sendMessageToBackground({ action: "getPlugDetectionStatus" });
+          if (response && response.status === "success") {
+            setIsPlugDetectionRunning(!!response.isRunning);
+          }
+        } catch (e) {
+          setIsPlugDetectionRunning(false);
+        }
+      })();
+    }
+  }, [activeTab, sendMessageToBackground]);
  
   // Listen for plug detection messages
   useEffect(() => {
@@ -341,9 +395,29 @@ function IndexPopup() {
         });
       } else if (message.action === 'plugDetectionStatusUpdate' && typeof message.isRunning === 'boolean') {
         setPlugDetectionEnabled(message.isRunning);
+        setIsPlugDetectionRunning(message.isRunning);
+      } else if (message.action === 'plugsFound' && message.plugs) {
+        setFoundPlugs(prev => {
+          // Merge new plugs with previous, keeping unique by userId, most recent first, max 20
+          const combined = [...message.plugs, ...prev];
+          const unique = [];
+          const seen = new Set();
+          for (const plug of combined) {
+            if (!seen.has(plug.userId)) {
+              unique.push(plug);
+              seen.add(plug.userId);
+            }
+            if (unique.length >= 20) break;
+          }
+          // Also update persistent storage
+          chrome.storage.local.set({ recentPlugs: unique });
+          return unique;
+        });
+      } else if (message.action === 'tradeAdStatusUpdate' && message.status && message.message) {
+        setTradeAdStatus({ status: message.status, message: message.message });
       }
     };
- 
+
     chrome.runtime.onMessage.addListener(messageListener);
     return () => chrome.runtime.onMessage.removeListener(messageListener);
   }, []);
@@ -362,11 +436,14 @@ function IndexPopup() {
       const response = await sendMessageToBackground({ action: "startPlugDetection" });
       if (response && response.status === "success") {
         setPlugDetectionEnabled(true);
+        setIsPlugDetectionRunning(true);
         alert('Plug detection started!');
       } else {
+        setIsPlugDetectionRunning(false);
         alert(`Failed to start plug detection: ${response?.message || 'Unknown error'}`);
       }
     } catch (error: any) {
+      setIsPlugDetectionRunning(false);
       alert(`Failed to start plug detection: ${error.message}`);
     } finally {
       setIsLoading(false);
@@ -379,6 +456,7 @@ function IndexPopup() {
       const response = await sendMessageToBackground({ action: "stopPlugDetection" });
       if (response && response.status === "success") {
         setPlugDetectionEnabled(false);
+        setIsPlugDetectionRunning(false);
         alert('Plug detection stopped!');
       } else {
         alert(`Failed to stop plug detection: ${response?.message || 'Unknown error'}`);
@@ -559,11 +637,14 @@ function IndexPopup() {
 
       const response = await sendMessageToBackground({ action: "startAutoTrade", tradeConfig: tradeConfig, interval: tradeInterval });
       if (response && response.status === "started") {
+        setIsPosterRunning(true);
         alert(`Autotrade started with ${tradeInterval} minute interval!`);
       } else {
+        setIsPosterRunning(false);
         alert(`Failed to start autotrade: ${response?.message || 'Unknown error'}`);
       }
     } catch (error: any) {
+      setIsPosterRunning(false);
       alert(`Failed to start autotrade: ${error.message}`);
     } finally {
       setIsLoading(false);
@@ -575,6 +656,7 @@ function IndexPopup() {
     try {
       const response = await sendMessageToBackground({ action: "stopAutoTrade" });
       if (response && response.status === "stopped") {
+        setIsPosterRunning(false);
         alert('Autotrade paused!');
       } else {
         alert(`Failed to pause autotrade: ${response?.message || 'Unknown error'}`);
@@ -670,13 +752,25 @@ function IndexPopup() {
 
   return (
     <div className="w-96 h-[600px] bg-gray-50 flex flex-col">
+      {/* Trade Ad Poster Status Banner */}
+      {tradeAdStatus && (
+        <div
+          className={`px-4 py-2 text-sm font-medium ${
+            tradeAdStatus.status === 'success'
+              ? 'bg-green-100 text-green-800 border-b border-green-300'
+              : 'bg-red-100 text-red-800 border-b border-red-300'
+          }`}
+        >
+          {tradeAdStatus.message}
+        </div>
+      )}
       {/* Header */}
       <div className="bg-white shadow-sm border-b border-gray-200 p-4">
         <div className="flex items-center space-x-3">
           {userAvatarUrl ? (
-            <img 
-              src={userAvatarUrl} 
-              alt="User Avatar" 
+            <img
+              src={userAvatarUrl}
+              alt="User Avatar"
               className="w-12 h-12 rounded-full object-cover"
             />
           ) : (
@@ -792,14 +886,14 @@ function IndexPopup() {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={startAutotrade}
-                    disabled={isLoading}
+                    disabled={isLoading || isPosterRunning}
                     className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {isLoading ? 'Starting...' : 'Start Poster'}
+                    {isPosterRunning ? 'Poster Running' : (isLoading ? 'Starting...' : 'Start Poster')}
                   </button>
                   <button
                     onClick={pauseAutotrade}
-                    disabled={isLoading}
+                    disabled={isLoading || !isPosterRunning}
                     className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isLoading ? 'Pausing...' : 'Pause Poster'}
@@ -1202,22 +1296,22 @@ function IndexPopup() {
                 <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div>
                     <p className="text-sm font-medium text-gray-700">Status</p>
-                    <p className="text-sm text-gray-500">{plugDetectionEnabled ? 'Running' : 'Stopped'}</p>
+                    <p className="text-sm text-gray-500">{isPlugDetectionRunning ? 'Running' : 'Stopped'}</p>
                   </div>
-                  <div className={`w-3 h-3 rounded-full ${plugDetectionEnabled ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                  <div className={`w-3 h-3 rounded-full ${isPlugDetectionRunning ? 'bg-green-400' : 'bg-red-400'}`}></div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={startPlugDetection}
-                    disabled={isLoading || plugDetectionEnabled}
+                    disabled={isLoading || isPlugDetectionRunning}
                     className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {isLoading ? 'Starting...' : 'Start Detection'}
+                    {isPlugDetectionRunning ? 'Detection Running' : (isLoading ? 'Starting...' : 'Start Detection')}
                   </button>
                   <button
                     onClick={stopPlugDetection}
-                    disabled={isLoading || !plugDetectionEnabled}
+                    disabled={isLoading || !isPlugDetectionRunning}
                     className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {isLoading ? 'Stopping...' : 'Stop Detection'}
@@ -1303,7 +1397,19 @@ function IndexPopup() {
 
             {/* Found Plugs */}
             <div className="card p-4">
-              <h4 className="text-sm font-medium text-gray-700 mb-3">Recent Plugs Found ({foundPlugs.length})</h4>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-sm font-medium text-gray-700">Recent Plugs Found ({foundPlugs.length})</h4>
+                <button
+                  onClick={() => {
+                    setFoundPlugs([]);
+                    chrome.storage.local.set({ recentPlugs: [] });
+                  }}
+                  className="text-xs text-red-600 hover:text-red-800 px-2 py-1 rounded border border-red-200 bg-red-50"
+                  title="Clear all recent plugs"
+                >
+                  Clear
+                </button>
+              </div>
               
               {foundPlugs.length > 0 ? (
                 <div className="space-y-2 max-h-40 overflow-y-auto">
@@ -1314,7 +1420,46 @@ function IndexPopup() {
                         <span className="text-xs text-orange-600 font-medium">{plug.tradeAdCount} ads</span>
                       </div>
                       <p className="text-xs text-gray-600 mb-2">Value: {plug.totalValue?.toLocaleString() || 'N/A'}</p>
-                      <div className="flex gap-2">
+                      
+                      {/* Offer Items */}
+                      <div className="mb-1">
+                        <span className="text-xs font-semibold text-gray-700">Offering:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {plug.tradeAd?.offerItems?.map(itemId => {
+                            const item = allRolimonsItems.find(i => i.id === itemId);
+                            return item ? (
+                              <div key={item.id} className="flex items-center gap-1 bg-white border border-gray-200 rounded px-1 py-0.5">
+                                <img src={item.thumbnailUrl || ''} alt={item.name} className="w-5 h-5 rounded" />
+                                <span className="text-xs">{item.name}</span>
+                                <span className="text-xs text-gray-500">{formatValue(item.value)}</span>
+                              </div>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                      
+                      {/* Request Items */}
+                      <div className="mb-1">
+                        <span className="text-xs font-semibold text-gray-700">Requesting:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {plug.tradeAd?.requestItems?.map(itemId => {
+                            const item = allRolimonsItems.find(i => i.id === itemId);
+                            return item ? (
+                              <div key={item.id} className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded px-1 py-0.5">
+                                <img src={item.thumbnailUrl || ''} alt={item.name} className="w-5 h-5 rounded" />
+                                <span className="text-xs">{item.name}</span>
+                                <span className="text-xs text-gray-500">{formatValue(item.value)}</span>
+                              </div>
+                            ) : null;
+                          })}
+                          {/* Show tags as chips */}
+                          {plug.tradeAd?.tags && plug.tradeAd.tags.map(tag => (
+                            <span key={tag} className="bg-blue-100 text-blue-700 text-xs rounded px-2 py-0.5 ml-1">{tag}</span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 mt-2">
                         <a
                           href={`https://www.rolimons.com/player/${plug.userId}`}
                           target="_blank"

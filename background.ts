@@ -81,6 +81,11 @@ async function postTradeAdWrapper(tradeConfig: TradeConfig, robloxUserId: number
       message: 'Your trade ad has been successfully posted on Rolimons.',
       priority: 2
     });
+    chrome.runtime.sendMessage({
+      action: 'tradeAdStatusUpdate',
+      status: 'success',
+      message: 'Your trade ad has been successfully posted on Rolimons.'
+    }).catch(() => {});
   } catch (error: any) {
     console.error("[background.ts] Error posting trade ad:", error);
     chrome.notifications.create({
@@ -90,6 +95,11 @@ async function postTradeAdWrapper(tradeConfig: TradeConfig, robloxUserId: number
       message: `Failed to post trade ad: ${error.message || error}`,
       priority: 2
     });
+    chrome.runtime.sendMessage({
+      action: 'tradeAdStatusUpdate',
+      status: 'failed',
+      message: `Failed to post trade ad: ${error.message || error}`
+    }).catch(() => {});
   }
 }
 
@@ -123,14 +133,22 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
     console.log(`[background.ts] Starting auto-trade with interval: ${interval} minutes`);
     console.log("[background.ts] Trade configuration received from popup:", tradeConfig);
     chrome.alarms.create('autoTradeAlarm', { periodInMinutes: interval });
-    chrome.storage.local.set({ autoTradeConfig: tradeConfig }, () => {
+    chrome.storage.local.set({ autoTradeConfig: tradeConfig, isAutoTradeRunning: true }, () => {
       console.log("[background.ts] Auto-trade configuration saved.");
     });
     sendResponse({ status: "started" } as MessageResponse);
   } else if (request.action === "stopAutoTrade") {
     console.log("[background.ts] Stopping auto-trade.");
     chrome.alarms.clear('autoTradeAlarm');
+    chrome.storage.local.set({ isAutoTradeRunning: false }, () => {
+      console.log("[background.ts] Auto-trade running state set to false.");
+    });
     sendResponse({ status: "stopped" } as MessageResponse);
+  } else if (request.action === "getAutoTradeStatus") {
+    chrome.storage.local.get(['isAutoTradeRunning'], (result) => {
+      sendResponse({ status: "success", isRunning: !!result.isAutoTradeRunning } as MessageResponse);
+    });
+    return true;
   } else if (request.action === "postTradeAd") {
     (async () => {
       const storedConfig = await chrome.storage.local.get(['autoTradeConfig', 'robloxUserId', 'rolimonsVerificationToken']);
@@ -298,7 +316,7 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
       try {
         await plugDetector.start();
         const settings = plugDetector.getSettings();
-        await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: true } });
+        await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: true }, isPlugDetectionRunning: true });
         console.log("[background.ts] Plug detection started");
         chrome.runtime.sendMessage({ action: 'plugDetectionStatusUpdate', isRunning: true }).catch(() => {});
         sendResponse({ status: "success", message: "Plug detection started" } as MessageResponse);
@@ -318,7 +336,7 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
       try {
         plugDetector.stop();
         const settings = plugDetector.getSettings();
-        await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: false } });
+        await chrome.storage.local.set({ plugDetectorSettings: { ...settings, enabled: false }, isPlugDetectionRunning: false });
         console.log("[background.ts] Plug detection stopped");
         chrome.runtime.sendMessage({ action: 'plugDetectionStatusUpdate', isRunning: false }).catch(() => {});
         sendResponse({ status: "success", message: "Plug detection stopped" } as MessageResponse);
@@ -381,6 +399,11 @@ chrome.runtime.onMessage.addListener((request: MessageRequest, sender, sendRespo
         sendResponse({ status: "failed", message: `Error clearing ignore lists: ${error.message}` } as MessageResponse);
       }
     })();
+    return true;
+  } else if (request.action === "getPlugDetectionStatus") {
+    chrome.storage.local.get(['isPlugDetectionRunning'], (result) => {
+      sendResponse({ status: "success", isRunning: !!result.isPlugDetectionRunning } as MessageResponse);
+    });
     return true;
   }
 });

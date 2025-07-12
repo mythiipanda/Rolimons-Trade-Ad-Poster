@@ -21,7 +21,7 @@ export interface RolimonsItem {
 }
 
 export interface MessageRequest {
-  action: "startAutoTrade" | "stopAutoTrade" | "postTradeAd" | "fetchCredentials" | "fetchUserAvatar" | "fetchUserInventory" | "fetchRolimonsItemThumbnails" | "getRolimonsItemDetails" | "getAllRolimonsItems" | "startPlugDetection" | "stopPlugDetection" | "updatePlugDetectionSettings" | "getPlugDetectionSettings" | "clearPlugIgnoreLists";
+  action: "startAutoTrade" | "stopAutoTrade" | "getAutoTradeStatus" | "getPlugDetectionStatus" | "postTradeAd" | "fetchCredentials" | "fetchUserAvatar" | "fetchUserInventory" | "fetchRolimonsItemThumbnails" | "getRolimonsItemDetails" | "getAllRolimonsItems" | "startPlugDetection" | "stopPlugDetection" | "updatePlugDetectionSettings" | "getPlugDetectionSettings" | "clearPlugIgnoreLists";
   interval?: number;
   tradeConfig?: TradeConfig;
   userId?: number;
@@ -46,4 +46,5 @@ export interface MessageResponse {
   stats?: any; // For plug detection stats
   plugs?: any[]; // For found plugs
   data?: any; // Generic for other responses
+  isRunning?: boolean; // For auto trade status
 }
