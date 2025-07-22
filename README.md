@@ -6,12 +6,10 @@ A Chrome extension that automates trade advertisement posting on Rolimons.com fo
 
 ### Want to just use the extension? It's super easy!
 
-1. **Download**: Click the green "Code" button above → "Download ZIP"
+1. **Download**: Go to Releases -> Download
 2. **Extract**: Unzip the downloaded file to your computer
-3. **Install**: Open Chrome → `chrome://extensions/` → Enable "Developer mode" → "Load unpacked" → Select the `extension` folder
+3. **Install**: Open Chrome → `chrome://extensions/` → Enable "Developer mode" → "Load unpacked" → Select the folder
 4. **Use**: Click the extension icon and start automating your trades!
-
-📖 **[See INSTALL.md for detailed step-by-step instructions](INSTALL.md)**
 
 ---
 
@@ -73,7 +71,6 @@ Only needed if you want to modify the extension code.
 
 ### 🤖 **Automated Trade Posting**
 - Automatically post trade advertisements on Rolimons at customizable intervals
-- Set trade intervals from 1 minute and up
 - Start/pause functionality for full control
 
 ### 📋 **Multiple Trade Configurations**
@@ -268,4 +265,4 @@ For support, feature requests, or bug reports:
 
 **⚡ Start automating your Roblox trades today with Rolimons Trade Ad Poster!**
 
-**🎯 For regular users: Just download the ZIP, extract, and load the `extension` folder - no technical setup required!**
+**🎯 For regular users: Just download the ZIP, extract, and load the folder - no technical setup required!**
