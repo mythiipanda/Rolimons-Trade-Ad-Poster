@@ -207,10 +207,15 @@ function IndexPopup() {
 
   // Save current config
   const saveCurrentConfig = useCallback(async (name: string) => {
+    // Always save item IDs, not uaids
+    const offerItemIds = selectedOfferItemIds.map(uaid => {
+      const item = userInventory.find(i => i.userAssetId === uaid);
+      return item ? item.id : uaid;
+    });
     const newConfig = {
       id: Date.now().toString(),
       name: name,
-      offerItemIds: selectedOfferItemIds,
+      offerItemIds,
       requestItemIds: selectedRequestItemIds,
       tradeTags: tradeTags,
       createdAt: Date.now()
@@ -226,17 +231,21 @@ function IndexPopup() {
     });
     
     return newConfig.id;
-  }, [selectedOfferItemIds, selectedRequestItemIds, tradeTags, savedConfigs]);
+  }, [selectedOfferItemIds, selectedRequestItemIds, tradeTags, savedConfigs, userInventory]);
 
   // Update existing config
   const updateCurrentConfig = useCallback(async () => {
     if (!currentConfigId) return;
-    
+    // Always save item IDs, not uaids
+    const offerItemIds = selectedOfferItemIds.map(uaid => {
+      const item = userInventory.find(i => i.userAssetId === uaid);
+      return item ? item.id : uaid;
+    });
     const updatedConfigs = savedConfigs.map(config =>
       config.id === currentConfigId
         ? {
             ...config,
-            offerItemIds: selectedOfferItemIds,
+            offerItemIds,
             requestItemIds: selectedRequestItemIds,
             tradeTags: tradeTags
           }
@@ -248,20 +257,24 @@ function IndexPopup() {
     await chrome.storage.local.set({
       savedConfigs: updatedConfigs
     });
-  }, [currentConfigId, selectedOfferItemIds, selectedRequestItemIds, tradeTags, savedConfigs]);
+  }, [currentConfigId, selectedOfferItemIds, selectedRequestItemIds, tradeTags, savedConfigs, userInventory]);
 
   // Load a specific config
   const loadConfig = useCallback(async (configId: string) => {
     const config = savedConfigs.find(c => c.id === configId);
     if (!config) return;
-    
-    setSelectedOfferItemIds(config.offerItemIds);
+    // Convert item IDs to uaids for UI selection
+    const offerUaids = config.offerItemIds.map(itemId => {
+      const item = userInventory.find(i => i.id === itemId);
+      return item ? item.userAssetId : itemId;
+    });
+    setSelectedOfferItemIds(offerUaids);
     setSelectedRequestItemIds(config.requestItemIds);
     setTradeTags(config.tradeTags);
     setCurrentConfigId(configId);
     
     await chrome.storage.local.set({ currentConfigId: configId });
-  }, [savedConfigs]);
+  }, [savedConfigs, userInventory]);
 
   // Delete a config
   const deleteConfig = useCallback(async (configId: string) => {
@@ -1127,6 +1140,17 @@ function IndexPopup() {
                     >
                       Save As
                     </button>
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Delete this config?")) {
+                          deleteConfig(currentConfigId);
+                        }
+                      }}
+                      className="btn-secondary text-sm px-3 py-1 text-red-600 hover:text-red-800 flex items-center"
+                      title="Delete this config"
+                    >
+                      Delete
+                    </button>
                   </>
                 ) : (
                   // Creating new config
@@ -1161,7 +1185,20 @@ function IndexPopup() {
               >
                 <option value="">Load a saved config...</option>
                 {savedConfigs.map(config => (
-                  <option key={config.id} value={config.id}>{config.name}</option>
+                  <div key={config.id} className="flex items-center">
+                    <option value={config.id}>{config.name}</option>
+                    <button
+                      type="button"
+                      className="ml-2 text-xs text-red-600 hover:text-red-800"
+                      title="Delete config"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        deleteConfig(config.id);
+                      }}
+                    >
+                    </button>
+                  </div>
                 ))}
               </select>
             )}
