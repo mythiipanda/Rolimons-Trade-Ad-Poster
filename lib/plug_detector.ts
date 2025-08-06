@@ -24,6 +24,20 @@ export interface RecentTradeAd {
   timestamp: number;
 }
 
+// Tag number-to-name mapping
+const TAG_MAP: Record<string, string> = {
+  "1": "Limited",
+  "2": "Rare",
+  "3": "Event",
+  "4": "Demand",
+  "5": "Upgrade",
+  "6": "Downgrade",
+  "7": "Collector",
+  "8": "Proof",
+  "9": "Quick",
+  "10": "Other"
+};
+
 export interface PlugDetectionSettings {
   maxTradeAds: number;
   fetchInterval: number; // in seconds
@@ -126,15 +140,25 @@ export class PlugDetector {
         const data = await response.json();
         const tradeAds = data.trade_ads || [];
         
-        return tradeAds.map((ad: any) => ({
-          id: ad[0],
-          userId: ad[2],
-          username: ad[3],
-          offerItems: ad[4]?.items || [],
-          requestItems: ad[5]?.items || [],
-          tags: ad[6] || [],
-          timestamp: Date.now()
-        }));
+        return tradeAds.map((ad: any) => {
+          // Tags can be in offer or request object
+          const offerTags = ad[4]?.tags || [];
+          const requestTags = ad[5]?.tags || [];
+          const rawTags = Array.from(new Set([...(ad[6] || []), ...offerTags, ...requestTags]));
+          // Convert tag numbers to names if possible
+          const tags = rawTags.map(tag =>
+            TAG_MAP[tag] ? TAG_MAP[tag] : tag
+          );
+          return {
+            id: ad[0],
+            userId: ad[2],
+            username: ad[3],
+            offerItems: ad[4]?.items || [],
+            requestItems: ad[5]?.items || [],
+            tags,
+            timestamp: Date.now()
+          };
+        });
       }
     } catch (error) {
       console.error("[PlugDetector] Error fetching recent trade ads:", error);
@@ -305,28 +329,28 @@ export class PlugDetector {
       persistentPlugs = stored.recentPlugs || [];
     } catch {}
 
-    const foundPlugs: PlugUser[] = [];
+    const foundPlugsMap = new Map<number, PlugUser>();
     const checkedUsers = new Set<number>();
-
+    
     for (const ad of recentAds) {
       // Skip if already checked this user in this scan
       if (checkedUsers.has(ad.userId)) continue;
       checkedUsers.add(ad.userId);
-
+    
       // Skip if user is in ignore list
       if (this.shouldIgnoreUser(ad.userId)) continue;
-
+    
       // Calculate trade value
       const totalValue = this.calculateTradeValue(ad.offerItems);
       
       // Skip if trade value is below minimum
       if (totalValue < this.settings.minValue) continue;
-
+    
       // Check user's trade ad count
       const tradeAdCount = await this.getUserTradeAdCount(ad.userId);
       
       if (tradeAdCount === null) continue;
-
+    
       if (tradeAdCount <= this.settings.maxTradeAds) {
         // Found a plug!
         const plugUser: PlugUser = {
@@ -337,23 +361,25 @@ export class PlugDetector {
           totalValue,
           timestamp: Date.now()
         };
-
-        foundPlugs.push(plugUser);
-
-        // Add to persistent recent plugs list (keep last 20)
-        persistentPlugs.unshift(plugUser);
+    
+        foundPlugsMap.set(ad.userId, plugUser);
+    
+        // Add to persistent recent plugs list (keep last 20, dedup by userId)
+        persistentPlugs = [plugUser, ...persistentPlugs.filter(p => p.userId !== ad.userId)];
         if (persistentPlugs.length > 20) persistentPlugs = persistentPlugs.slice(0, 20);
         await chrome.storage.local.set({ recentPlugs: persistentPlugs });
-
+    
         console.log(`[PlugDetector] Found plug: ${ad.username} (${tradeAdCount} trade ads, ${totalValue} value)`);
       } else {
         // User has too many trade ads, add to permanent ignore
         this.addToPermanentIgnore(ad.userId);
       }
-
+    
       // Add small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 5000)); // Increased delay to 5000ms (5 seconds)
     }
+    
+    const foundPlugs = Array.from(foundPlugsMap.values());
 
     if (foundPlugs.length > 0) {
       // Notify about found plugs
