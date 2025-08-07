@@ -26,16 +26,16 @@ export interface RecentTradeAd {
 
 // Tag number-to-name mapping
 const TAG_MAP: Record<string, string> = {
-  "1": "Limited",
-  "2": "Rare",
-  "3": "Event",
-  "4": "Demand",
-  "5": "Upgrade",
-  "6": "Downgrade",
-  "7": "Collector",
-  "8": "Proof",
-  "9": "Quick",
-  "10": "Other"
+  "1": "demand",
+  "2": "rares",
+  "3": "robux",
+  "4": "any",
+  "5": "upgrade",
+  "6": "downgrade",
+  "7": "rap",
+  "8": "wishlist",
+  "9": "projecteds",
+  "10": "adds"
 };
 
 export interface PlugDetectionSettings {
