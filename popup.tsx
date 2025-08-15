@@ -12,6 +12,22 @@ function IndexPopup() {
   const [userInventory, setUserInventory] = useState<RobloxItem[]>([]);
   const [tradeInterval, setTradeInterval] = useState<number>(15);
 
+  // Load tradeInterval from storage on mount
+  useEffect(() => {
+    chrome.storage.local.get(['tradeInterval']).then((stored) => {
+      if (typeof stored.tradeInterval === 'number' && !isNaN(stored.tradeInterval)) {
+        setTradeInterval(stored.tradeInterval);
+      }
+    });
+  }, []);
+
+  // Persist tradeInterval to storage whenever it changes
+  useEffect(() => {
+    if (typeof tradeInterval === 'number' && !isNaN(tradeInterval)) {
+      chrome.storage.local.set({ tradeInterval });
+    }
+  }, [tradeInterval]);
+
   const [allRolimonsItems, setAllRolimonsItems] = useState<RolimonsItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<RolimonsItem[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -272,9 +288,9 @@ function IndexPopup() {
     setSelectedRequestItemIds(config.requestItemIds);
     setTradeTags(config.tradeTags);
     setCurrentConfigId(configId);
-    
+
     await chrome.storage.local.set({ currentConfigId: configId });
-  }, [savedConfigs, userInventory]);
+  }, [savedConfigs, userInventory, allRolimonsItems]);
 
   // Delete a config
   const deleteConfig = useCallback(async (configId: string) => {
@@ -325,11 +341,60 @@ function IndexPopup() {
   }, [robloxUserId, displayUserAvatar, displayUserInventory]);
 
   // Effect to load configs and selections
+  // Always load configs/settings on mount, regardless of inventory/items state
   useEffect(() => {
-    if (allRolimonsItems.length > 0 && userInventory.length > 0) {
-      loadConfigsAndSettings();
+    loadConfigsAndSettings();
+  }, [loadConfigsAndSettings]);
+
+  // When inventory/items load, re-map config selections to available items
+  useEffect(() => {
+    if (allRolimonsItems.length > 0 && userInventory.length > 0 && currentConfigId && savedConfigs.length > 0) {
+      const config = savedConfigs.find((c) => c.id === currentConfigId);
+      if (config) {
+        // Map offerItemIds to uaids
+        const offerUaids = config.offerItemIds.map(itemId => {
+          const item = userInventory.find(i => i.id === itemId);
+          return item ? item.userAssetId : itemId;
+        });
+        setSelectedOfferItemIds(offerUaids);
+        // Only keep requestItemIds that exist in allRolimonsItems
+        const validRequestItemIds = (config.requestItemIds || []).filter((itemId) =>
+          allRolimonsItems.some(item => item.id === itemId)
+        );
+        setSelectedRequestItemIds(validRequestItemIds);
+        setTradeTags(config.tradeTags || ["any"]);
+      }
     }
-  }, [allRolimonsItems, userInventory, loadConfigsAndSettings]);
+  }, [allRolimonsItems, userInventory, currentConfigId, savedConfigs]);
+
+  // Fallback: Always attempt to restore config and selections from storage on mount,
+  // even if inventory or items are empty, to avoid blank UI after popup reopen.
+  useEffect(() => {
+    const restoreSelectionsFallback = async () => {
+      const stored = await chrome.storage.local.get([
+        'savedConfigs',
+        'currentConfigId',
+        'autoCycleEnabled',
+        'selectedOfferItemIds',
+        'selectedSearchItemIds',
+        'tradeTags'
+      ]);
+      // Only restore if not already set by main effect
+      if (!currentConfigId && !selectedOfferItemIds.length && !selectedRequestItemIds.length) {
+        setSavedConfigs(stored.savedConfigs || []);
+        setCurrentConfigId(stored.currentConfigId || null);
+        setAutoCycleEnabled(stored.autoCycleEnabled || false);
+        setSelectedOfferItemIds(stored.selectedOfferItemIds || []);
+        setSelectedRequestItemIds(stored.selectedSearchItemIds || []);
+        setTradeTags(stored.tradeTags || ["any"]);
+      }
+    };
+    restoreSelectionsFallback();
+  // Only run on mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Prevent config selection UI if inventory/items not loaded
 
   // Load plug detection settings
   const loadPlugSettings = useCallback(async () => {
@@ -854,6 +919,7 @@ function IndexPopup() {
                       }
                     }}
                     className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+                    disabled={userInventory.length === 0 || allRolimonsItems.length === 0}
                   >
                     <option value="">Select a config...</option>
                     {savedConfigs.map(config => (
@@ -1182,6 +1248,7 @@ function IndexPopup() {
                 value={currentConfigId || ""}
                 onChange={(e) => e.target.value && loadConfig(e.target.value)}
                 className="w-full text-sm border border-gray-300 rounded px-3 py-2 bg-white"
+                disabled={userInventory.length === 0 || allRolimonsItems.length === 0}
               >
                 <option value="">Load a saved config...</option>
                 {savedConfigs.map(config => (
